@@ -1,0 +1,8 @@
+[package]
+name = "ghostwriter"
+version = "0.1.0"
+authors = ["Oliver Nightingale <oliver.nightingale1@gmail.com>"]
+
+[dependencies]
+git2 = "0.3"
+url = "1.2"
