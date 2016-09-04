@@ -4,9 +4,10 @@ extern crate url;
 use std::env;
 use std::io;
 use std::process;
-use std::path::Path;
+use std::error;
+use std::fmt;
 
-use url::{Url, ParseError};
+use url::Url;
 
 struct CommitInfo<'a> {
     local_ref: &'a str,
@@ -32,46 +33,111 @@ impl<'a> CommitInfo<'a> {
     }
 }
 
-fn main() {
-    let mut args = env::args();
+#[derive(Debug)]
+struct Args {
+    remote: String,
+    url: Url,
+}
 
-    let remote = args.nth(1).unwrap();
-    let raw_url = args.next().unwrap();
-    let url = Url::parse(&raw_url).unwrap();
+impl Args {
+    fn from_env(mut argv: env::Args) -> Result<Self, String> {
+        let remote = try!(argv.nth(1).ok_or("remote arg is required".to_owned()));
+        let url = try!(argv.next()
+            .ok_or("remote url arg is required".to_owned())
+            .and_then(|arg| Url::parse(&arg).map_err(|e| e.to_string()) ));
 
-    println!("remote: {}", remote);
-    println!("url: {}", url.host_str().unwrap());
+        return Ok(Args{remote: remote, url: url})
+    }
+}
 
-    let mut input = String::new();
-    let commit_info = match io::stdin().read_line(&mut input) {
-        Ok(_) => {
-            CommitInfo::from_line(&input)
+#[derive(Debug)]
+enum HookError {
+    NoRemoteHost,
+    Io(io::Error),
+    Git(git2::Error),
+}
+
+impl fmt::Display for HookError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            HookError::Io(ref e) => write!(f, "IO Error: {}", e),
+            HookError::Git(ref e) => write!(f, "Git Error: {}", e),
+            HookError::NoRemoteHost => write!(f, "No Remote Host"),
         }
-        Err(error) => {
-            panic!("unable to read from stdin")
+    }
+}
+
+impl error::Error for HookError {
+    fn description(&self) -> &str {
+        match *self {
+            HookError::Io(ref e) => e.description(),
+            HookError::Git(ref e) => e.description(),
+            HookError::NoRemoteHost => "no remote host",
         }
-    };
+    }
 
-    let repository_path = env::current_dir().unwrap();
-    let repository = git2::Repository::open(repository_path).unwrap();
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            HookError::Io(ref e) => Some(e),
+            HookError::Git(ref e) => Some(e),
+            HookError::NoRemoteHost => None,
+        }
+    }
+}
 
-    let config_entry = format!("ghostwriter.{}.author", url.host().unwrap());
-    let config = repository.config().unwrap();
-    let author = config.get_string(&config_entry).unwrap();
+impl From<io::Error> for HookError {
+    fn from(e: io::Error) -> HookError {
+        HookError::Io(e)
+    }
+}
 
-    let mut walker = repository.revwalk().unwrap();
-    walker.push_range(&commit_info.range()).unwrap();
+impl From<git2::Error> for HookError {
+    fn from(e: git2::Error) -> HookError {
+        HookError::Git(e)
+    }
+}
+
+fn enforce_commit_author(args: &Args, commit_info: &CommitInfo) -> Result<bool, HookError> {
+    let repository_path = try!(env::current_dir());
+    let repository = try!(git2::Repository::open(repository_path));
+
+    let host = try!(args.url.host().ok_or(HookError::NoRemoteHost));
+    let config_entry = format!("ghostwriter.{}.author", host);
+
+    let git_config = try!(repository.config());
+    let author = try!(git_config.get_string(&config_entry));
+
+    let mut walker = try!(repository.revwalk());
+    try!(walker.push_range(&commit_info.range()));
 
     let ok = walker
         .map(|oid| repository.find_commit(oid) )
         .filter_map(|commit| commit.ok() )
         .all(|commit| {
-            commit.author().email().unwrap() == author
+            commit.author().email().unwrap() == &author
         });
 
-    println!("{}", commit_info.range());
-    println!("{}", author);
-    println!("{}", ok);
+    return Ok(ok);
+}
+
+fn main() {
+    let args = Args::from_env(env::args()).unwrap();
+
+    let mut buffer = String::new();
+    io::stdin().read_line(&mut buffer).expect("Unable to read from stdin");
+    let commit_info = CommitInfo::from_line(&buffer);
+
+    match enforce_commit_author(&args, &commit_info) {
+        Ok(all_commits_pass) => {
+            if !all_commits_pass {
+                process::exit(1);
+            }
+        },
+
+        Err(_) => {
+            process::exit(2);
+        }
+    };
 
     process::exit(1);
 }
