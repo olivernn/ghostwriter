@@ -51,6 +51,8 @@ fn enforce_commit_author(args: &Args, commit_info: &CommitRange) -> Result<Check
         }
     }
 
+    println!("verifying commits to {} are by {}", host, author);
+
     let commits_with_wrong_author: Vec<git2::Oid> = walker
         .filter_map(|oid| repository.find_commit(oid).ok() )
         .filter(|commit| {
@@ -75,7 +77,7 @@ fn main() {
 
     match enforce_commit_author(&args, &commit_info) {
         Ok(Check::Fail(commit_ids)) => {
-            println!("ghostwriter rejecting push due to commits with wrong author:");
+            println!("rejecting push due to commits with wrong author:");
             for commit_id in commit_ids {
                 println!("{}", commit_id);
             }
