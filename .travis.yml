@@ -6,3 +6,15 @@ rust:
 matrix:
     allow_failures:
       - rust: nightly
+os:
+  - linux
+  - osx
+addons:
+  apt:
+    sources:
+      - kalakris-cmake
+    packages:
+      - cmake
+      - libcurl4-openssl-dev
+      - libelf-dev
+      - libdw-dev
