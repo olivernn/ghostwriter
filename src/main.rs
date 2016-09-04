@@ -28,7 +28,14 @@ fn enforce_commit_author(args: &Args, commit_info: &CommitRange) -> Result<Check
     let config_entry = format!("ghostwriter.{}.author", host);
 
     let git_config = try!(repository.config());
-    let author = try!(git_config.get_string(&config_entry));
+
+    // TODO: this is annoying, the git library does not distinguish
+    // between an error when getting a config value, and the config
+    // value not existing. We assume here that
+    let author = match git_config.get_string(&config_entry) {
+        Ok(author) => author,
+        Err(_) => return Ok(Check::Pass),
+    };
 
     let mut walker = try!(repository.revwalk());
 
