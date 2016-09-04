@@ -152,8 +152,7 @@ fn enforce_commit_author(args: &Args, commit_info: &CommitRange) -> Result<Check
     }
 
     let commits_with_wrong_author: Vec<git2::Oid> = walker
-        .map(|oid| repository.find_commit(oid) )
-        .filter_map(|commit| commit.ok() )
+        .filter_map(|oid| repository.find_commit(oid).ok() )
         .filter(|commit| {
             commit.author().email().map_or(false, |email| email != &author)
         })
