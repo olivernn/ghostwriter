@@ -25,15 +25,17 @@ fn enforce_commit_author(args: &Args, commit_info: &CommitRange) -> Result<Check
     let repository = try!(git2::Repository::open(repository_path));
 
     let host = try!(args.url.host().ok_or(HookError::NoRemoteHost));
-    let config_entry = format!("ghostwriter.{}.author", host);
+    let config_entry = format!("ghostwriter.{}.email", host);
 
     let git_config = try!(repository.config());
 
-    // TODO: this is annoying, the git library does not distinguish
-    // between an error when getting a config value, and the config
-    // value not existing. We assume here that
-    let author = match git_config.get_string(&config_entry) {
-        Ok(author) => author,
+    let email = match git_config.get_string(&config_entry) {
+        Ok(email) => email,
+        Err(_) => return Ok(Check::Pass),
+    };
+
+    let name = match git_config.get_string("user.name") {
+        Ok(name) => name,
         Err(_) => return Ok(Check::Pass),
     };
 
@@ -47,16 +49,19 @@ fn enforce_commit_author(args: &Args, commit_info: &CommitRange) -> Result<Check
             try!(walker.push(commit_info.local_sha1));
         },
         PushType::Delete => {
-            panic!("This should never happen because we return early for PushType::Delete");
+            unreachable!("This should never happen because we return early for PushType::Delete");
         }
     }
 
-    println!("verifying commits to {} are by {}", host, author);
+    println!("verifying commits to {} are by {} with email {}", host, name, email);
 
     let commits_with_wrong_author: Vec<git2::Oid> = walker
         .filter_map(|oid| repository.find_commit(oid).ok() )
         .filter(|commit| {
-            commit.author().email().map_or(false, |email| email != &author)
+            commit.author().name().map_or(false, |commit_name| commit_name == name)
+        })
+        .filter(|commit| {
+            commit.author().email().map_or(false, |commit_email| commit_email != &email)
         })
         .map(|commit| commit.id() )
         .collect();
